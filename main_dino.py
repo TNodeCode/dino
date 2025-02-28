@@ -130,6 +130,7 @@ def get_args_parser():
 
 
 def train_dino(args):
+    device = utils.get_device()
     utils.init_distributed_mode(args)
     utils.fix_random_seeds(args.seed)
     print("git:\n  {}\n".format(utils.get_sha()))
@@ -191,21 +192,29 @@ def train_dino(args):
         DINOHead(embed_dim, args.out_dim, args.use_bn_in_head),
     )
     # move networks to gpu
-    student, teacher = student.cuda(), teacher.cuda()
+    student, teacher = student.to(device), teacher.to(device)
     # synchronize batch norms (if any)
     if utils.has_batchnorms(student):
-        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
-        teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
+        if torch.cuda.is_available():
+            student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
+            teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
 
         # we need DDP wrapper to have synchro batch norms working...
-        teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
-        teacher_without_ddp = teacher.module
+        if torch.cuda.is_available():
+            teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[args.gpu])
+            teacher_without_ddp = teacher.module
+        else:
+            teacher_without_ddp = teacher.to(device)
     else:
         # teacher_without_ddp and teacher are the same thing
         teacher_without_ddp = teacher
-    student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
-    # teacher and student start with the same weights
-    teacher_without_ddp.load_state_dict(student.module.state_dict())
+    if torch.cuda.is_available():
+        student = nn.parallel.DistributedDataParallel(student, device_ids=[args.gpu])
+        # teacher and student start with the same weights
+        teacher_without_ddp.load_state_dict(student.module.state_dict())
+    else:
+        # teacher and student start with the same weights
+        teacher_without_ddp.load_state_dict(student.state_dict())
     # there is no backpropagation through the teacher, so no need for gradients
     for p in teacher.parameters():
         p.requires_grad = False
@@ -219,7 +228,9 @@ def train_dino(args):
         args.teacher_temp,
         args.warmup_teacher_temp_epochs,
         args.epochs,
-    ).cuda()
+    )
+    
+    dino_loss = dino_loss.to(device)
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(student)
@@ -312,9 +323,14 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu
-        images = [im.cuda(non_blocking=True) for im in images]
+        images = [im.to(utils.get_device(), non_blocking=True) for im in images]
         # teacher and student forward passes + compute dino loss
-        with torch.cuda.amp.autocast(fp16_scaler is not None):
+        if utils.get_device() in ["cuda", "cpu"]:
+            with torch.autocast(utils.get_device(), enabled=fp16_scaler is not None):
+                teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
+                student_output = student(images)
+                loss = dino_loss(student_output, teacher_output, epoch)
+        else:
             teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
             student_output = student(images)
             loss = dino_loss(student_output, teacher_output, epoch)
@@ -346,11 +362,13 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         # EMA update for the teacher
         with torch.no_grad():
             m = momentum_schedule[it]  # momentum parameter
-            for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
+            student_params = student.module.parameters() if torch.cuda.is_available() else student.parameters()
+            for param_q, param_k in zip(student_params, teacher_without_ddp.parameters()):
                 param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])

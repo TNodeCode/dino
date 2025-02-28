@@ -31,6 +31,7 @@ import torch
 from torch import nn
 import torch.distributed as dist
 from PIL import ImageFilter, ImageOps
+import utils
 
 
 class GaussianBlur(object):
@@ -465,6 +466,7 @@ def setup_for_distributed(is_master):
 
 
 def init_distributed_mode(args):
+    backend = "nccl"
     # launched with torch.distributed.launch
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
@@ -482,17 +484,21 @@ def init_distributed_mode(args):
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '29500'
     else:
-        print('Does not support training without GPU.')
-        sys.exit(1)
+        print(f"No GPU found. Will train on {utils.get_device()}.")
+        args.rank, args.gpu, args.world_size = 0, 0, 1
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = '29500'
+        backend = "gloo"
 
     dist.init_process_group(
-        backend="nccl",
+        backend=backend,
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
     )
 
-    torch.cuda.set_device(args.gpu)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(args.gpu)
     print('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url), flush=True)
     dist.barrier()
@@ -827,3 +833,12 @@ def multi_scale(samples, model):
     v /= 3
     v /= v.norm()
     return v
+
+
+def get_device():
+    if os.getenv("DEVICE"):
+        return os.getenv("DEVICE")
+    elif torch.cuda.is_available():
+        return "cuda:0"
+    else:
+        return "cpu"
