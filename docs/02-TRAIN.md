@@ -5,3 +5,7 @@ In this section we will explain how you can pretrain a model with DINO using thi
 ## Prepare dataset
 
 This repository ueses PyTorch's ImageFolder dataset 
+
+```bash
+$ python main_dino.py --arch vit_small --data_path data/MOT17 --output_dir work_dirs
+```
