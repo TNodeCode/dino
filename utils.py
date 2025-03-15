@@ -629,6 +629,7 @@ class MultiCropWrapper(nn.Module):
             if isinstance(_out, tuple):
                 _out = _out[0]
             # accumulate outputs
+            print("_OUT", _out.shape, "OUTPUT", output.shape)
             output = torch.cat((output, _out))
             start_idx = end_idx
         # Run the head forward on the concatenated features.

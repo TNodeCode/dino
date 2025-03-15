@@ -4,6 +4,7 @@
 
 # Data
 data/
+mmdetection/
 *.pth
 
 ### JupyterNotebooks ###

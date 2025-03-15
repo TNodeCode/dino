@@ -33,17 +33,19 @@ from torchvision import models as torchvision_models
 import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead
+from mm import get_mmdet_model
 
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(torchvision_models.__dict__[name]))
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DINO', add_help=False)
 
     # Model parameters
     parser.add_argument('--arch', default='vit_small', type=str,
-        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small'] \
+        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small', 'mmdet'] \
                 + torchvision_archs + torch.hub.list("facebookresearch/xcit:main"),
         help="""Name of architecture to train. For quick experiments with ViTs,
         we recommend using vit_tiny or vit_small.""")
@@ -52,6 +54,10 @@ def get_args_parser():
         values leads to better performance but requires more memory. Applies only
         for ViTs (vit_tiny, vit_small and vit_base). If <16, we recommend disabling
         mixed precision training (--use_fp16 false) to avoid unstabilities.""")
+    parser.add_argument('--image_size', default=224, type=int, help="""Dimensionality of
+        images that are run through the backbone model.""")
+    parser.add_argument('--embed_dim', default=100, type=int, help="""Dimensionality of
+        the embedding output of the backbone model.""")
     parser.add_argument('--out_dim', default=65536, type=int, help="""Dimensionality of
         the DINO head output. For complex and large datasets large values (like 65k) work well.""")
     parser.add_argument('--norm_last_layer', default=True, type=utils.bool_flag,
@@ -142,6 +148,8 @@ def train_dino(args):
         args.global_crops_scale,
         args.local_crops_scale,
         args.local_crops_number,
+        image_size_global=args.image_size,
+        image_size_local=args.image_size
     )
     dataset = datasets.ImageFolder(args.data_path, transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
@@ -177,6 +185,10 @@ def train_dino(args):
         student = torchvision_models.__dict__[args.arch]()
         teacher = torchvision_models.__dict__[args.arch]()
         embed_dim = student.fc.weight.shape[1]
+    elif "mmdet" in args.arch:
+        student = get_mmdet_model()
+        teacher = get_mmdet_model()
+        embed_dim = args.embed_dim
     else:
         print(f"Unknow architecture: {args.arch}")
 
@@ -435,7 +447,7 @@ class DINOLoss(nn.Module):
 
 
 class DataAugmentationDINO(object):
-    def __init__(self, global_crops_scale, local_crops_scale, local_crops_number):
+    def __init__(self, global_crops_scale, local_crops_scale, local_crops_number, image_size_global=224, image_size_local=96):
         flip_and_color_jitter = transforms.Compose([
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomApply(
@@ -451,14 +463,14 @@ class DataAugmentationDINO(object):
 
         # first global crop
         self.global_transfo1 = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(image_size_global, scale=global_crops_scale, interpolation=Image.BICUBIC),
             flip_and_color_jitter,
             utils.GaussianBlur(1.0),
             normalize,
         ])
         # second global crop
         self.global_transfo2 = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(image_size_global, scale=global_crops_scale, interpolation=Image.BICUBIC),
             flip_and_color_jitter,
             utils.GaussianBlur(0.1),
             utils.Solarization(0.2),
@@ -467,7 +479,7 @@ class DataAugmentationDINO(object):
         # transformation for the local small crops
         self.local_crops_number = local_crops_number
         self.local_transfo = transforms.Compose([
-            transforms.RandomResizedCrop(96, scale=local_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(image_size_local, scale=local_crops_scale, interpolation=Image.BICUBIC),
             flip_and_color_jitter,
             utils.GaussianBlur(p=0.5),
             normalize,
