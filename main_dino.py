@@ -337,8 +337,8 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         # move images to gpu
         images = [im.to(utils.get_device(), non_blocking=True) for im in images]
         # teacher and student forward passes + compute dino loss
-        if utils.get_device() in ["cuda", "cpu"]:
-            with torch.autocast(utils.get_device(), enabled=fp16_scaler is not None):
+        if utils.get_device() in ["cuda", "cuda:0", "cpu"]:
+            with torch.autocast("cuda", enabled=fp16_scaler is not None):
                 teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
                 student_output = student(images)
                 loss = dino_loss(student_output, teacher_output, epoch)

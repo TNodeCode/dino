@@ -15,10 +15,10 @@ class FasterRCNNBackbone(torch.nn.Module):
         self.head = None
 
     def forward(self, x):
-        print("FASTER RCNN IN", x.shape)
+        #print("FASTER RCNN IN", x.shape)
         out = self.model.backbone(x)
-        print("FASTER RCNN OUT", [f.shape for f in out])
-        return out[self.backbone_layer]
+        #print("FASTER RCNN OUT", [f.shape for f in out])
+        return torch.flatten(out[self.backbone_layer], start_dim=1)
 
 
 
