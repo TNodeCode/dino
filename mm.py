@@ -1,5 +1,9 @@
 from mmdet.apis import init_detector, inference_detector
+from mmdet.structures.det_data_sample import DetDataSample
+from mmdet.models.layers import SinePositionalEncoding
+from mmengine import Config
 import torch
+import torch.nn as nn
 import os
 
 class FasterRCNNBackbone(torch.nn.Module):
@@ -21,10 +25,36 @@ class FasterRCNNBackbone(torch.nn.Module):
         return torch.flatten(out[self.backbone_layer], start_dim=1)
 
 
+class BBoxHead(nn.Module):
+    def forward(self, hidden_states, references):
+        return hidden_states
 
-def get_mmdet_model():
+class DeformableDETRBackbone(torch.nn.Module):
+            
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        cfg = Config.fromfile('mmdetection/mmdet/configs/deformable_detr/deformable_detr_r50_16xb2_50e_coco.py')
+        self.model = init_detector(config=cfg, checkpoint=None, device='cpu')
+        #self.model.positional_encoding = SinePositionalEncoding(num_feats=256, temperature=10000, normalize=True, scale=6.283185307179586, eps=1e-06)
+        #self.model.neck = nn.Identity()
+        self.model.bbox_head = BBoxHead()
+        
+    def forward(self, x):
+        # out has shape ([layers=6, batch_size, n_queries=300, channels=256])
+        out = self.model(x, [DetDataSample(batch_input_shape=x.shape[2:], img_shape=x.shape[2:])])
+        # we are only interested in the last layer
+        out = out[-1]
+        return out
+
+
+def get_mmdet_model(args):
     # We only want to train the backbone of Faster-RCNN
-    model = FasterRCNNBackbone()
+    if args.arch == "mmdet:faster-rcnn":
+        model = FasterRCNNBackbone()
+    elif args.arch == "mmdet:deformable-detr":
+        model = DeformableDETRBackbone()
+    else:
+        raise Exception(f"{args.arch} is not supported")
 
     # return model and output dimension
     return model

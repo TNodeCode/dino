@@ -5,6 +5,7 @@
 # Data
 data/
 mmdetection/
+mmpretrain/
 work_dirs/
 *.pth
 
