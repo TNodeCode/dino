@@ -19,9 +19,7 @@ class FasterRCNNBackbone(torch.nn.Module):
         self.head = None
 
     def forward(self, x):
-        #print("FASTER RCNN IN", x.shape)
         out = self.model.backbone(x)
-        #print("FASTER RCNN OUT", [f.shape for f in out])
         return torch.flatten(out[self.backbone_layer], start_dim=1)
 
 
@@ -35,15 +33,14 @@ class DeformableDETRBackbone(torch.nn.Module):
         super().__init__()
         cfg = Config.fromfile('mmdetection/mmdet/configs/deformable_detr/deformable_detr_r50_16xb2_50e_coco.py')
         self.model = init_detector(config=cfg, checkpoint=None, device='cpu')
-        #self.model.positional_encoding = SinePositionalEncoding(num_feats=256, temperature=10000, normalize=True, scale=6.283185307179586, eps=1e-06)
-        #self.model.neck = nn.Identity()
         self.model.bbox_head = BBoxHead()
         
     def forward(self, x):
         # out has shape ([layers=6, batch_size, n_queries=300, channels=256])
         out = self.model(x, [DetDataSample(batch_input_shape=x.shape[2:], img_shape=x.shape[2:])])
         # we are only interested in the last layer
-        out = out[-1]
+        out= out[-1]
+        out = torch.flatten(out, start_dim=1)
         return out
 
 
