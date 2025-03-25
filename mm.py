@@ -25,26 +25,31 @@ class FasterRCNNBackbone(torch.nn.Module):
         return torch.flatten(out[self.backbone_layer], start_dim=1)
 
 
-class BBoxHead(nn.Module):
-    def forward(self, hidden_states, references):
-        return hidden_states
+def save_pre_hook(savevar):
+    def print_pre(module, input):
+        savevar._emb = input[0]
+    return print_pre
+    
+def print_post(module ,input, output):
+    print("  ------------ I am done with the forward", str(module), len(input), input[0].shape, len(output), output[0].shape)
+
 
 class DeformableDETRBackbone(torch.nn.Module):
             
     def __init__(self, *args, **kwargs):
         super().__init__()
         cfg = Config.fromfile('mmdetection/mmdet/configs/deformable_detr/deformable_detr_r50_16xb2_50e_coco.py')
+        self._emb = None
         self.model = init_detector(config=cfg, checkpoint=None, device='cpu')
-        #self.model.positional_encoding = SinePositionalEncoding(num_feats=256, temperature=10000, normalize=True, scale=6.283185307179586, eps=1e-06)
-        #self.model.neck = nn.Identity()
-        self.model.bbox_head = BBoxHead()
+
         
     def forward(self, x):
+        # register forward hook
+        self.model.bbox_head.cls_branches[0].register_forward_pre_hook(save_pre_hook(self))
         # out has shape ([layers=6, batch_size, n_queries=300, channels=256])
-        out = self.model(x, [DetDataSample(batch_input_shape=x.shape[2:], img_shape=x.shape[2:])])
+        self.model(x, [DetDataSample(batch_input_shape=x.shape[2:], img_shape=x.shape[2:])])
         # we are only interested in the last layer
-        out = out[-1]
-        return out
+        return torch.flatten(self._emb, start_dim=1)
 
 
 def get_mmdet_model(args):
