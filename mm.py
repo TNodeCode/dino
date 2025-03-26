@@ -31,6 +31,14 @@ class BBoxHead(nn.Module):
     
 class EmbOutput:
     _out = None
+def save_pre_hook(savevar):
+    def print_pre(module, input):
+        savevar._emb = input[0]
+    return print_pre
+    
+def print_post(module ,input, output):
+    print("  ------------ I am done with the forward", str(module), len(input), input[0].shape, len(output), output[0].shape)
+
 
 class DeformableDETRBackbone(torch.nn.Module):
     def __init__(self, *args, **kwargs):
@@ -41,6 +49,8 @@ class DeformableDETRBackbone(torch.nn.Module):
         self.model = MODELS_DET.build(cfg.model.backbone)
         
     def forward(self, x):
+        # register forward hook
+        self.model.bbox_head.cls_branches[0].register_forward_pre_hook(save_pre_hook(self))
         # out has shape ([layers=6, batch_size, n_queries=300, channels=256])
         out = self.model(x)
         # we are only interested in the last layer
