@@ -19,5 +19,10 @@ $ python main_dino.py --arch mmdet --data_path data/MOT17/train --image_size 256
 Deformable DETR Training:
 
 ```bash
-python main_dino.py --arch mmdet:deformable-detr --data_path data/MOT17/train --image_size 512 --embed_dim 256 --batch_size_per_gpu 1 --local_crops_number 1 --output_dir work_dirs
+python main_dino.py --arch mmdet:deformable-detr --data_path data/MOT17/train --image_size 512 --embed_dim 76800 --batch_size_per_gpu 1 --local_crops_number 1 --output_dir work_dirs
+
+Deformable DETR Refine Training:
+
+```bash
+python main_dino.py --arch mmdet:deformable-detr-refine --data_path data/MOT17/train --image_size 512 --embed_dim 76800 --batch_size_per_gpu 1 --local_crops_number 1 --output_dir work_dirs
 ```
