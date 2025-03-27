@@ -9,13 +9,12 @@ import torch.nn as nn
 import os
 
 class FasterRCNNBackbone(torch.nn.Module):
-    def __init__(self, backbone_layer=-1):
+    def __init__(self, config_file: str, backbone_layer=-1):
         super().__init__()
         self.backbone_layer = backbone_layer
-        config_file = 'mmdetection/configs/faster_rcnn/faster-rcnn_r50_fpn_1x_coco.py'
-        checkpoint_file = 'https://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/faster_rcnn_r50_fpn_1x_coco/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth'
+        config_file = config_file
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        model = init_detector(config_file, checkpoint_file, device=device)
+        model = init_detector(config_file, None, device=device)
         self.model = model.backbone
         self.reduce = nn.Conv2d(in_channels=2048,out_channels=1,kernel_size=1,stride=1,padding=0)
         del model
@@ -32,7 +31,7 @@ class FasterRCNNBackbone(torch.nn.Module):
         x = x[-1]
         x = self.reduce(x)
         return torch.flatten(x, start_dim=1)
-
+        
 
 class DeformableDETRBackbone(torch.nn.Module):
     def __init__(self, *args, **kwargs):
@@ -64,7 +63,13 @@ class DeformableDETRBackbone(torch.nn.Module):
 def get_mmdet_model(args):
     # We only want to train the backbone of Faster-RCNN
     if args.arch == "mmdet:faster-rcnn":
-        model = FasterRCNNBackbone()
+        model = FasterRCNNBackbone(config_file='mmdetection/configs/faster_rcnn/faster-rcnn_r50_fpn_1x_coco.py')
+    elif args.arch == "mmdet:faster-rcnn-101":
+        model = FasterRCNNBackbone(config_file='mmdetection/configs/faster_rcnn/faster-rcnn_r101_fpn_1x_coco.py')
+    elif args.arch == "mmdet:faster-rcnn-x101-32":
+        model = FasterRCNNBackbone(config_file='mmdetection/configs/faster_rcnn/faster-rcnn_x101-32x4d_fpn_1x_coco.py')
+    elif args.arch == "mmdet:faster-rcnn-x101-64":
+        model = FasterRCNNBackbone(config_file='mmdetection/configs/faster_rcnn/faster-rcnn_x101-64x4d_fpn_1x_coco.py')
     elif args.arch == "mmdet:deformable-detr":
         model = DeformableDETRBackbone()
     else:
