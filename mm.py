@@ -16,28 +16,22 @@ class FasterRCNNBackbone(torch.nn.Module):
         checkpoint_file = 'https://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/faster_rcnn_r50_fpn_1x_coco/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth'
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         model = init_detector(config_file, checkpoint_file, device=device)
-        self.model = model
-        self.fc = None
-        self.head = None
+        self.model = model.backbone
+        self.reduce = nn.Conv2d(in_channels=2048,out_channels=1,kernel_size=1,stride=1,padding=0)
+        del model
+        
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print("TOTAL PARAMS", total_params)
+        print("TRAINABLE PARAMS", trainable_params)
+        print(self)
 
     def forward(self, x):
-        out = self.model.backbone(x)
-        return torch.flatten(out[self.backbone_layer], start_dim=1)
-
-
-class BBoxHead(nn.Module):
-    def forward(self, hidden_states, references):
-        return hidden_states
-    
-class EmbOutput:
-    _out = None
-def save_pre_hook(savevar):
-    def print_pre(module, input):
-        savevar._emb = input[0]
-    return print_pre
-    
-def print_post(module ,input, output):
-    print("  ------------ I am done with the forward", str(module), len(input), input[0].shape, len(output), output[0].shape)
+        x = self.model(x)
+        # we are only interested in the last layer
+        x = x[-1]
+        x = self.reduce(x)
+        return torch.flatten(x, start_dim=1)
 
 
 class DeformableDETRBackbone(torch.nn.Module):
@@ -45,18 +39,26 @@ class DeformableDETRBackbone(torch.nn.Module):
         super().__init__()
         # Load a base configuration file
         cfg = Config.fromfile('mmdetection/mmdet/configs/deformable_detr/deformable_detr_r50_16xb2_50e_coco.py')
+        #cfg.model.backbone.frozen_stages=4
         # Build model
-        self.model = MODELS_DET.build(cfg.model.backbone)
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model = init_detector(cfg, None, device=device)
+        self.model = model.backbone
+        self.reduce = nn.Conv2d(in_channels=2048,out_channels=1,kernel_size=1,stride=1,padding=0)
+        del model
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print("TOTAL PARAMS", total_params)
+        print("TRAINABLE PARAMS", trainable_params)
         
     def forward(self, x):
-        # register forward hook
-        self.model.bbox_head.cls_branches[0].register_forward_pre_hook(save_pre_hook(self))
         # out has shape ([layers=6, batch_size, n_queries=300, channels=256])
-        out = self.model(x)
+        #out = self.model(x, [DetDataSample(batch_input_shape=x.shape[2:], img_shape=x.shape[2:])])
+        x = self.model(x)
         # we are only interested in the last layer
-        out= out[-1]
-        out = torch.flatten(out, start_dim=1)
-        return out
+        x= x[-1]
+        x = self.reduce(x)
+        return torch.flatten(x, start_dim=1)
 
 
 def get_mmdet_model(args):
