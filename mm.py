@@ -1,20 +1,21 @@
-from mmdet.apis import init_detector, inference_detector
-from mmdet.structures.det_data_sample import DetDataSample
-from mmdet.models.layers import SinePositionalEncoding
+from mmdet.apis import init_detector
 from mmengine import Config
-from mmdet.registry import MODELS as MODELS_DET
+from mmengine.runner import save_checkpoint
 
 import torch
 import torch.nn as nn
-import os
+
+
+def load_detector(config_file: str) -> nn.Module:
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = init_detector(config_file, None, device=device)
+    return model
+
 
 class FasterRCNNBackbone(torch.nn.Module):
-    def __init__(self, config_file: str, backbone_layer=-1):
+    def __init__(self, config_file: str):
         super().__init__()
-        self.backbone_layer = backbone_layer
-        config_file = config_file
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        model = init_detector(config_file, None, device=device)
+        model = load_detector(config_file=config_file)
         self.model = model.backbone
         self.reduce = nn.Conv2d(in_channels=2048,out_channels=1,kernel_size=1,stride=1,padding=0)
         del model
@@ -77,3 +78,27 @@ def get_mmdet_model(args):
 
     # return model and output dimension
     return model
+
+
+def save_faster_rcnn_pretrained(detector_config: str, weights_file: str):
+    model = load_detector(config_file=detector_config)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    # Load the full state_dict from the pretrained model
+    pretrained_state_dict = torch.load(weights_file, map_location=device)
+
+    # Filter out only backbone keys (ignore 'reduce')
+    backbone_state_dict = {
+        k.replace('model.', ''): v for k, v in pretrained_state_dict.items()
+        if k.startswith('model.') and 'reduce' not in k
+    }
+
+    # Load into the Faster R-CNN model's backbone
+    missing, unexpected = model.backbone.load_state_dict(backbone_state_dict, strict=False)
+    print("Missing keys:", missing)
+    print("Unexpected keys:", unexpected)
+
+    # torch.save(model.state_dict(), 'faster_rcnn_with_dino_backbone.pth')
+
+    # If you’re using MMDetection’s custom training setup and want to save in its format:
+    save_checkpoint(model, 'faster_rcnn_with_dino_backbone.pth')
