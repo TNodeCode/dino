@@ -6,16 +6,18 @@ import torch
 import torch.nn as nn
 
 
-def load_detector(config_file: str) -> nn.Module:
+def load_detector(config: Config) -> nn.Module:
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = init_detector(config_file, None, device=device)
+    model = init_detector(config, None, device=device)
     return model
 
 
 class FasterRCNNBackbone(torch.nn.Module):
     def __init__(self, config_file: str):
         super().__init__()
-        model = load_detector(config_file=config_file)
+        cfg = Config.fromfile(config_file)
+        cfg.model.backbone.frozen_stages=2
+        model = load_detector(cfg)
         self.model = model.backbone
         self.reduce = nn.Conv2d(in_channels=2048,out_channels=1,kernel_size=1,stride=1,padding=0)
         del model
@@ -63,7 +65,7 @@ class DeformableDETRBackbone(torch.nn.Module):
 
 def get_mmdet_model(args):
     # We only want to train the backbone of Faster-RCNN
-    if args.arch == "mmdet:faster-rcnn":
+    if args.arch == "mmdet:faster-rcnn-50":
         model = FasterRCNNBackbone(config_file='mmdetection/configs/faster_rcnn/faster-rcnn_r50_fpn_1x_coco.py')
     elif args.arch == "mmdet:faster-rcnn-101":
         model = FasterRCNNBackbone(config_file='mmdetection/configs/faster_rcnn/faster-rcnn_r101_fpn_1x_coco.py')
@@ -81,24 +83,35 @@ def get_mmdet_model(args):
 
 
 def save_faster_rcnn_pretrained(detector_config: str, weights_file: str):
-    model = load_detector(config_file=detector_config)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Load the full state_dict from the pretrained model
     pretrained_state_dict = torch.load(weights_file, map_location=device)
+    student = pretrained_state_dict['student']
+    teacher = pretrained_state_dict['teacher']
 
     # Filter out only backbone keys (ignore 'reduce')
-    backbone_state_dict = {
-        k.replace('model.', ''): v for k, v in pretrained_state_dict.items()
-        if k.startswith('model.') and 'reduce' not in k
+    backbone_student_state_dict = {
+        k.replace('module.backbone.model.', ''): v for k, v in student.items()
+        if k.startswith('module.backbone.model.') and 'reduce' not in k
     }
 
-    # Load into the Faster R-CNN model's backbone
-    missing, unexpected = model.backbone.load_state_dict(backbone_state_dict, strict=False)
-    print("Missing keys:", missing)
-    print("Unexpected keys:", unexpected)
+    def build_detector(config_file: str, backbone_dict, output_file: str):
+        # Load into the Faster R-CNN model's backbone
+        detector = load_detector(config_file=detector_config).train()
+        missing, unexpected = detector.backbone.load_state_dict(backbone_student_state_dict, strict=False)
+        if missing:
+            raise ValueError("Missing keys", missing)
+        if unexpected:
+            raise ValueError("Unexpected keys:", unexpected)
+        print("Missing keys:", missing)
+        print("Unexpected keys:", unexpected)
 
-    # torch.save(model.state_dict(), 'faster_rcnn_with_dino_backbone.pth')
+        torch.save(detector.state_dict(), output_file)
 
-    # If you’re using MMDetection’s custom training setup and want to save in its format:
-    save_checkpoint(model, 'faster_rcnn_with_dino_backbone.pth')
+        # If you’re using MMDetection’s custom training setup and want to save in its format:
+        #save_checkpoint(detector, output_file)
+
+    build_detector(config_file=detector_config, backbone_dict=student, output_file="faster_rcnn_student.pth")
+    build_detector(config_file=detector_config, backbone_dict=teacher, output_file="faster_rcnn_teacher.pth")
+    
